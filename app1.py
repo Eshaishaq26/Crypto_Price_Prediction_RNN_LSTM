@@ -93,4 +93,5 @@ plt.ylabel("Predicted Price")
 plt.legend()
 st.pyplot(plt)
 
-st.success("Prediction Completed Successfully!")
+
+
