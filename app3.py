@@ -8,13 +8,14 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import SimpleRNN, LSTM, Dense
 
+# Streamlit Page Setup
 st.set_page_config(page_title="Crypto Price Prediction", page_icon="🪙", layout="wide")
 
 st.title("🪙 Crypto Price Prediction using RNN + LSTM")
 st.write("Select any cryptocurrency to see its predicted prices using AI models (RNN + LSTM).")
 
 # ============================================
-# 1️⃣ Load Dataset (download once)
+# 1️⃣ Load and Merge Dataset
 # ============================================
 @st.cache_data
 def load_dataset():
@@ -33,7 +34,7 @@ def load_dataset():
 data = load_dataset()
 
 # ============================================
-# 2️⃣ Coin Selection
+# 2️⃣ Dropdown for Coin Selection
 # ============================================
 coins = sorted(data["Coin"].unique())
 coin_name = st.selectbox("Select a Coin", coins, index=0)
@@ -42,7 +43,7 @@ coin_data = data[data["Coin"] == coin_name][["timestamp", "close"]].dropna().cop
 coin_data.set_index("timestamp", inplace=True)
 
 # ============================================
-# 3️⃣ Preprocessing
+# 3️⃣ Data Preprocessing
 # ============================================
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(coin_data)
@@ -62,7 +63,7 @@ X_train, X_test = X[:train_size], X[train_size:]
 y_train, y_test = y[:train_size], y[train_size:]
 
 # ============================================
-# 4️⃣ Define Models
+# 4️⃣ Build RNN and LSTM Models
 # ============================================
 def build_rnn():
     model = Sequential([
@@ -89,59 +90,60 @@ with st.spinner(f"Training RNN and LSTM models for {coin_name}..."):
     rnn_model = build_rnn()
     lstm_model = build_lstm()
 
-    rnn_model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=0)
-    lstm_model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=0)
+    rnn_history = rnn_model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=0)
+    lstm_history = lstm_model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=0)
+
+# Compare model performance
+rnn_loss = rnn_history.history["loss"][-1]
+lstm_loss = lstm_history.history["loss"][-1]
+
+best_model = rnn_model if rnn_loss < lstm_loss else lstm_model
+best_model_name = "RNN" if rnn_loss < lstm_loss else "LSTM"
+
+st.success(f"✅ {best_model_name} model selected based on better performance (lower loss).")
 
 # ============================================
 # 6️⃣ Predictions
 # ============================================
-rnn_pred = rnn_model.predict(X_test)
-lstm_pred = lstm_model.predict(X_test)
-
-rnn_pred_rescaled = scaler.inverse_transform(rnn_pred)
-lstm_pred_rescaled = scaler.inverse_transform(lstm_pred)
-y_test_rescaled = scaler.inverse_transform(y_test.reshape(-1, 1))
+predicted = best_model.predict(X_test)
+predicted = scaler.inverse_transform(predicted.reshape(-1, 1))
+actual = scaler.inverse_transform(y_test.reshape(-1, 1))
 
 # ============================================
-# 7️⃣ Future Forecast (Next 30 Days)
+# 7️⃣ Future 30-Day Forecast
 # ============================================
-def forecast_next_days(model, last_data, days=30):
-    future = []
-    current = last_data.copy()
-    for _ in range(days):
-        pred = model.predict(current.reshape(1, time_step, 1), verbose=0)[0][0]
-        future.append(pred)
-        current = np.append(current[1:], pred)
-    return np.array(future)
+future_input = scaled_data[-time_step:].reshape(1, time_step, 1)
+future_predictions = []
 
-future_preds = forecast_next_days(lstm_model, scaled_data[-time_step:])
-future_prices = scaler.inverse_transform(future_preds.reshape(-1, 1))
+for _ in range(30):
+    next_price = best_model.predict(future_input)[0, 0]
+    future_predictions.append(next_price)
+    future_input = np.append(future_input[:, 1:, :], [[[next_price]]], axis=1)
+
+future_predictions = scaler.inverse_transform(np.array(future_predictions).reshape(-1, 1))
 
 # ============================================
 # 8️⃣ Visualization
 # ============================================
-st.subheader(f"📈 Actual vs Predicted Prices for {coin_name}")
+col1, col2 = st.columns(2)
 
-fig1, ax1 = plt.subplots(figsize=(10, 4))
-ax1.plot(y_test_rescaled, label="Actual Prices", color="blue")
-ax1.plot(rnn_pred_rescaled, label="RNN Predicted", color="green", linestyle="dashed")
-ax1.plot(lstm_pred_rescaled, label="LSTM Predicted", color="red", linestyle="dashed")
-ax1.set_title(f"{coin_name} — Actual vs Predicted Prices")
-ax1.set_xlabel("Days")
-ax1.set_ylabel("Price (USD)")
-ax1.legend()
-st.pyplot(fig1)
+with col1:
+    st.subheader(f"📊 {coin_name} Actual vs Predicted Prices ({best_model_name} Model)")
+    fig1, ax1 = plt.subplots(figsize=(8, 4))
+    ax1.plot(actual, label="Actual Price", color='green')
+    ax1.plot(predicted, label="Predicted Price", color='orange')
+    ax1.set_xlabel("Days")
+    ax1.set_ylabel("Price")
+    ax1.legend()
+    st.pyplot(fig1)
 
-# ============================================
-# 9️⃣ Future Forecast Graph
-# ============================================
-st.subheader(f"🔮 Next 30 Days Forecast for {coin_name}")
+with col2:
+    st.subheader(f"📈 Next 30 Days Forecast for {coin_name}")
+    fig2, ax2 = plt.subplots(figsize=(8, 4))
+    ax2.plot(range(1, 31), future_predictions, label="Predicted Future Price", color='red')
+    ax2.set_xlabel("Days Ahead")
+    ax2.set_ylabel("Predicted Price")
+    ax2.legend()
+    st.pyplot(fig2)
 
-fig2, ax2 = plt.subplots(figsize=(10, 4))
-ax2.plot(range(1, 31), future_prices, marker='o', color="orange")
-ax2.set_title(f"{coin_name} — 30-Day Price Forecast (using LSTM)")
-ax2.set_xlabel("Future Days")
-ax2.set_ylabel("Predicted Price (USD)")
-st.pyplot(fig2)
 
-st.success("✅ Prediction and Forecast Ready!")
